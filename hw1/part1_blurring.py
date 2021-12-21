@@ -64,7 +64,8 @@ def motion_blur(img, psf_list):
     """
     for k in range(len(psf_list)):
         blurred_img = scipy.signal.convolve2d(img, psf_list[k], mode='same', boundary='wrap')
-        cv2.imwrite(f"blurred/blurred_{k}.png", blurred_img)
+        num = str(k).zfill(3)
+        cv2.imwrite(f"blurred/blurred_{num}.jpg", blurred_img)
 
 
 trajectories = load_trajectories('100_motion_paths.mat')
