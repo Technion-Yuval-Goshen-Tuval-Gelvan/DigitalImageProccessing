@@ -51,8 +51,8 @@ def create_psf(trajectories, psf_size=20):
                                    bins=psf_size,
                                    cmap='gray',
                                    density=True)
-        # plt.savefig(f"PSFs/PSF_{k}.png")
-        # scipy.io.savemat(f"PSFs/PSF_{k}.mat", {'items': hist})
+        plt.savefig(f"PSFs/PSF_{k}.png")
+        scipy.io.savemat(f"PSFs/PSF_{k}.mat", {'items': hist})
         psf_list.append(hist)
 
     return psf_list
@@ -76,5 +76,3 @@ im = cv2.imread("DIPSourceHW1.jpg", cv2.IMREAD_GRAYSCALE)
 
 motion_blur(im, psf_list)
 
-# if __name__ == '__main__':
-#     main()
