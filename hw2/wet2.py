@@ -25,8 +25,8 @@ def create_patches(img, num_patches=50, patch_size=9):
     return patches
 
 
-def calc_Rj_for_patch(patch, kernel_size):
-
+# def calc_Rj_for_patch(patch, kernel_size):
+#
 
 
 def estimate_kernel(img, num_large_patches=20, num_small_patches=100, large_patch_size=16,
@@ -52,8 +52,7 @@ def estimate_kernel(img, num_large_patches=20, num_small_patches=100, large_patc
 
 
 
-continuous_image = cv2.imread('DIPSourceHW2.png')
-plt.imshow(continuous_image, cmap='gray')
+continuous_image = cv2.imread('DIPSourceHW2.png', cv2.IMREAD_GRAYSCALE)
 
 gaussian_kernel = gaussian_kernel(KERNEL_SIZE, std=GAUSSIAN_STD)
 l_im_gaussian = down_sample(continuous_image, gaussian_kernel, LOW_RES_RATIO)
