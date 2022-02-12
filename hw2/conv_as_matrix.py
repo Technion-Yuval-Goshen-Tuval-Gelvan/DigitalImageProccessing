@@ -38,8 +38,9 @@ def get_image_convolution_matrix(im, k_size):
         for j in range(doubly_indices.shape[1]):
             doubly_blocked_matrix[i * im_size: (i + 1) * im_size, j * k_size: (j + 1) * k_size] = \
                 circulant_matrices[doubly_indices[i, j]]
+    conv_mat = doubly_blocked_matrix @ np.fliplr(np.eye(k_size ** 2))
 
-    return doubly_blocked_matrix
+    return conv_mat
 
 
 def get_downsample_matrix(im_size, ratio):
@@ -64,6 +65,9 @@ def get_downsample_convolution_matrix(im, ratio, k_size):
     downsample_matrix = get_downsample_matrix(im.shape[0], ratio)
     return downsample_matrix @ conv_mat
 
+
+# im = np.array([[1, 2, 3, 11], [4, 5, 6, 12], [7, 8, 9, 13], [10, 14, 15, 16]])
+# kernel = np.array([[2, 4, 6], [8, 10, 12], [14, 16, 18]])
 #
 # print("result:")
 # conv_mat = get_image_convolution_matrix(im, kernel.shape[0])
@@ -71,9 +75,8 @@ def get_downsample_convolution_matrix(im, ratio, k_size):
 #
 # Rj = downsample_mat @ conv_mat
 #
-# kernel_fliped = np.flipud(np.fliplr(kernel))
 #
-# print((Rj @ kernel_fliped.reshape(-1, 1)).reshape(im.shape[0] // 2, im.shape[0] // 2))
+# print((Rj @ kernel.reshape(-1, 1)).reshape(im.shape[0] // 2, im.shape[0] // 2))
 #
 # # kernel = np.flipud(kernel)
 # # kernel = np.fliplr(kernel)

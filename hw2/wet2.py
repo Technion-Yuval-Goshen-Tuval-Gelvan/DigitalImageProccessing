@@ -2,6 +2,8 @@ import cv2
 import scipy.signal
 from matplotlib import pyplot as plt
 import numpy as np
+from scipy import fftpack
+
 from wet2_utils import *
 from conv_as_matrix import *
 
@@ -36,14 +38,12 @@ def regularization_term(kernel):
     # k_derivatives = np.sqrt(k_x ** 2 + k_y ** 2)
     # k_derivatives = k_derivatives / np.sum(k_derivatives)
     k_laplacian = cv2.Laplacian(kernel, cv2.CV_64F)
-    plt.imshow(k_laplacian, cmap='gray')
-    plt.show()
     k_derivatives = k_laplacian.reshape((-1, 1))
     return k_derivatives @ k_derivatives.T
 
 
 
-def estimate_kernel(img, num_large_patches=30, num_small_patches=30, large_patch_size=16,
+def estimate_kernel(img, num_large_patches=100, num_small_patches=100, large_patch_size=16,
                     num_iterations=50, kernel_size=KERNEL_SIZE, reg_weight=1, weights_sigma=0.1):
     large_patches = create_patches(img, num_large_patches, large_patch_size)
     small_patches = create_patches(img, num_small_patches, large_patch_size // ALPHA)
@@ -54,19 +54,20 @@ def estimate_kernel(img, num_large_patches=30, num_small_patches=30, large_patch
         R_j_list.append(R_j)  # save them for later (last step)
 
     # plot some patches:
-    plot_sample_pathces(large_patches[:9])
+    # plot_sample_pathces(large_patches[:9])
 
     # initialize delta kernel:
     kernel = np.zeros((kernel_size, kernel_size))
     kernel[kernel_size // 2, kernel_size // 2] = 1
 
     for _ in range(num_iterations):
+        # plt.imshow(kernel, cmap='gray')
+        # plt.show()
         down_sampled_large_patches = [] # r_j^alpha in the paper
         for j, patch in enumerate(large_patches):
             R_j = R_j_list[j]
-            fliped_stacked_kernel = np.flipud(np.fliplr(kernel))
-            fliped_stacked_kernel = np.reshape(fliped_stacked_kernel, (-1, 1))
-            down_sampled_large_patches.append(np.squeeze(R_j @ fliped_stacked_kernel))
+            stacked_kernel = np.reshape(kernel, (-1, 1))
+            down_sampled_large_patches.append(np.squeeze(R_j @ stacked_kernel))
         down_sampled_large_patches = np.array(down_sampled_large_patches)
 
         W = []
@@ -78,7 +79,7 @@ def estimate_kernel(img, num_large_patches=30, num_small_patches=30, large_patch
             w_i = w_i / np.sum(w_i)
             W.append(w_i)
         W = np.array(W)
-        W /= np.sum(W, axis=1)[:, np.newaxis]
+        # W /= np.sum(W, axis=1)[:, np.newaxis]
 
         # calculate new kernel k = A^-1 @ b:
         A = np.zeros((kernel_size**2, kernel_size**2))
@@ -87,7 +88,7 @@ def estimate_kernel(img, num_large_patches=30, num_small_patches=30, large_patch
             R_j = R_j_list[j]
             A += R_j.T @ R_j * np.sum(W[:, j])
             for i in range(num_small_patches):
-                qi = np.flipud(np.fliplr(small_patches[i]))
+                qi = small_patches[i]
                 qi = qi.reshape((-1, 1))
                 b += W[i, j] * R_j.T @ qi
 
@@ -99,12 +100,17 @@ def estimate_kernel(img, num_large_patches=30, num_small_patches=30, large_patch
         kernel = kernel.reshape((kernel_size, kernel_size))
         kernel = kernel/np.sum(kernel)
 
-
     return kernel
 
 
+def psnr(im1, im2):
+    mse = np.mean(np.power(np.subtract(im1, im2), 2))
+    PIXEL_MAX = 1.0
+    return 20 * np.log10(PIXEL_MAX) - 10 * np.log10(mse)
+
 
 continuous_image = cv2.imread('DIPSourceHW2.png', cv2.IMREAD_GRAYSCALE) / 255
+continuous_image = continuous_image[:-3, :-3]
 
 gaussian_kernel = gaussian_kernel(KERNEL_SIZE, std=GAUSSIAN_STD)
 l_im_gaussian = down_sample(continuous_image, gaussian_kernel, LOW_RES_RATIO)
@@ -120,7 +126,25 @@ cv2.imwrite('l_im_sinc.png', l_im_sinc)
 cv2.imwrite('h_im_sinc.png', h_im_sinc)
 
 
-kernel = estimate_kernel(l_im_gaussian, num_iterations=15)
+kernel = estimate_kernel(l_im_gaussian, num_large_patches=30, num_small_patches=100, num_iterations=10, reg_weight=0)
 plt.imshow(kernel, cmap='gray')
 plt.show()
 
+kernel_F = fftpack.fftshift(fftpack.fft2(kernel))
+deblur_kernel_F = kernel_F ** (-1)
+deblur_kernel = np.abs(fftpack.ifft2(fftpack.ifftshift(deblur_kernel_F)))
+plt.imshow(deblur_kernel, cmap='gray')
+plt.show()
+
+l_im_gaussian_recon = cv2.resize(l_im_gaussian, (l_im_gaussian.shape[1]*2, l_im_gaussian.shape[0]*2))
+
+l_im_gaussian_recon = scipy.signal.convolve2d(l_im_gaussian_recon, deblur_kernel, mode='same', boundary='wrap')
+
+plt.imshow(h_im_gaussian, cmap='gray')
+plt.show()
+plt.imshow(l_im_gaussian, cmap='gray')
+plt.show()
+plt.imshow(l_im_gaussian_recon, cmap='gray')
+plt.show()
+
+print("psnr:", psnr(l_im_gaussian_recon, h_im_gaussian))
