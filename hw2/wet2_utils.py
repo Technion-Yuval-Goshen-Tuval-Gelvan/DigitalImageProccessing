@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 import scipy.signal
 
 
-def gaussian_kernel(size, std=1):
+def get_gaussian_kernel(size, std=1):
     edge = size // 2
     ax = np.linspace(-edge, edge, num=size)
     xx, yy = np.meshgrid(ax, ax)

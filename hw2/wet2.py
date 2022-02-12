@@ -42,9 +42,8 @@ def regularization_term(kernel):
     return k_derivatives @ k_derivatives.T
 
 
-
 def estimate_kernel(img, num_large_patches=100, num_small_patches=100, large_patch_size=16,
-                    num_iterations=50, kernel_size=KERNEL_SIZE, reg_weight=1, weights_sigma=0.1):
+                    num_iterations=50, kernel_size=KERNEL_SIZE, reg_weight=1, weights_sigma=10, show_plots=False):
     large_patches = create_patches(img, num_large_patches, large_patch_size)
     small_patches = create_patches(img, num_small_patches, large_patch_size // ALPHA)
 
@@ -54,27 +53,40 @@ def estimate_kernel(img, num_large_patches=100, num_small_patches=100, large_pat
         R_j_list.append(R_j)  # save them for later (last step)
 
     # plot some patches:
-    # plot_sample_pathces(large_patches[:9])
+    plot_sample_pathces(large_patches[:9])
 
     # initialize delta kernel:
     kernel = np.zeros((kernel_size, kernel_size))
     kernel[kernel_size // 2, kernel_size // 2] = 1
 
     for _ in range(num_iterations):
-        # plt.imshow(kernel, cmap='gray')
-        # plt.show()
+        if show_plots:
+            plt.imshow(kernel, cmap='gray')
+            plt.show()
         down_sampled_large_patches = [] # r_j^alpha in the paper
         for j, patch in enumerate(large_patches):
             R_j = R_j_list[j]
             stacked_kernel = np.reshape(kernel, (-1, 1))
             down_sampled_large_patches.append(np.squeeze(R_j @ stacked_kernel))
+        # down_sampled_large_patches = np.array(down_sampled_large_patches)
+
+        # plot downsampled large patches:
+        if show_plots:
+            _down_sampled = []
+            for i in range(len(down_sampled_large_patches)):
+                p = down_sampled_large_patches[i].reshape((large_patch_size // ALPHA, large_patch_size // ALPHA))
+                # p = np.roll(p, 1, axis=0)
+                # p = np.roll(p, 1, axis=1)
+                # down_sampled_large_patches[i] = p.reshape(-1)
+                _down_sampled.append(p)
+            plot_sample_pathces(_down_sampled[:9])
         down_sampled_large_patches = np.array(down_sampled_large_patches)
 
         W = []
-        for qi in small_patches: # calculate each line in w_ij
+        for qi in small_patches: # calculate each row in w_ij
             qi = qi.reshape((1, -1))
             w_i = qi - down_sampled_large_patches  # for each j, using broadcasting
-            w_i = np.linalg.norm(w_i, axis=1, ord=2)
+            w_i = np.linalg.norm(w_i, axis=1, ord=1)
             w_i = np.exp(-0.5 * w_i/(weights_sigma**2))
             w_i = w_i / np.sum(w_i)
             W.append(w_i)
@@ -112,7 +124,7 @@ def psnr(im1, im2):
 continuous_image = cv2.imread('DIPSourceHW2.png', cv2.IMREAD_GRAYSCALE) / 255
 continuous_image = continuous_image[:-3, :-3]
 
-gaussian_kernel = gaussian_kernel(KERNEL_SIZE, std=GAUSSIAN_STD)
+gaussian_kernel = get_gaussian_kernel(KERNEL_SIZE, std=GAUSSIAN_STD)
 l_im_gaussian = down_sample(continuous_image, gaussian_kernel, LOW_RES_RATIO)
 h_im_gaussian = down_sample(continuous_image, gaussian_kernel, HIGH_RES_RATIO)
 cv2.imwrite('l_im_gaussian.png', l_im_gaussian)
@@ -126,7 +138,8 @@ cv2.imwrite('l_im_sinc.png', l_im_sinc)
 cv2.imwrite('h_im_sinc.png', h_im_sinc)
 
 
-kernel = estimate_kernel(l_im_gaussian, num_large_patches=30, num_small_patches=100, num_iterations=10, reg_weight=0)
+kernel = estimate_kernel(l_im_gaussian, num_large_patches=200, num_small_patches=200, num_iterations=5,
+                         reg_weight=0, weights_sigma=0.5, large_patch_size=16, show_plots=True)
 plt.imshow(kernel, cmap='gray')
 plt.show()
 
