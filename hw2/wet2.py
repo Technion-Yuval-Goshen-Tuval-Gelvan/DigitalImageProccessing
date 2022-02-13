@@ -43,7 +43,9 @@ def regularization_term(kernel):
 
 
 def estimate_kernel(img, num_large_patches=100, num_small_patches=100, large_patch_size=16,
-                    num_iterations=50, kernel_size=KERNEL_SIZE, reg_weight=1, weights_sigma=10, show_plots=False):
+                    num_iterations=50, kernel_size=KERNEL_SIZE, reg_weight=1, weights_sigma=10,
+                    k_neighbors=10, show_plots=False):
+
     large_patches = create_patches(img, num_large_patches, large_patch_size)
     small_patches = create_patches(img, num_small_patches, large_patch_size // ALPHA)
 
@@ -88,6 +90,8 @@ def estimate_kernel(img, num_large_patches=100, num_small_patches=100, large_pat
             w_i = qi - down_sampled_large_patches  # for each j, using broadcasting
             w_i = np.linalg.norm(w_i, axis=1, ord=1)
             w_i = np.exp(-0.5 * w_i/(weights_sigma**2))
+            # take only k_neighbors closest neighbors and normalize:
+            w_i = w_i * (w_i >= np.sort(w_i)[[-k_neighbors]]).astype(int)
             w_i = w_i / np.sum(w_i)
             W.append(w_i)
         W = np.array(W)
@@ -96,13 +100,19 @@ def estimate_kernel(img, num_large_patches=100, num_small_patches=100, large_pat
         # calculate new kernel k = A^-1 @ b:
         A = np.zeros((kernel_size**2, kernel_size**2))
         b = np.zeros((kernel_size**2, 1))
-        for j in range(num_large_patches):
-            R_j = R_j_list[j]
-            A += R_j.T @ R_j * np.sum(W[:, j])
-            for i in range(num_small_patches):
-                qi = small_patches[i]
-                qi = qi.reshape((-1, 1))
-                b += W[i, j] * R_j.T @ qi
+
+        # for j in range(num_large_patches):
+        #     R_j = R_j_list[j]
+        #     A += R_j.T @ R_j * np.sum(W[:, j])
+        #     for i in range(num_small_patches):
+        #         qi = small_patches[i]
+        #         qi = qi.reshape((-1, 1))
+        #         b += W[i, j] * R_j.T @ qi
+
+        for i in range(num_small_patches):
+            for j in range(num_large_patches):
+                A += W[i, j] * R_j_list[j].T @ R_j_list[j]
+                b += W[i, j] * R_j_list[j].T @ small_patches[i].reshape((-1, 1))
 
         A = A / weights_sigma**2
         # add regularization C^T @ C
@@ -138,8 +148,8 @@ cv2.imwrite('l_im_sinc.png', l_im_sinc)
 cv2.imwrite('h_im_sinc.png', h_im_sinc)
 
 
-kernel = estimate_kernel(l_im_gaussian, num_large_patches=200, num_small_patches=200, num_iterations=5,
-                         reg_weight=0, weights_sigma=0.5, large_patch_size=16, show_plots=True)
+kernel = estimate_kernel(l_im_gaussian, num_large_patches=1000, num_small_patches=1000, num_iterations=5,
+                         reg_weight=0, weights_sigma=1, large_patch_size=16, show_plots=True)
 plt.imshow(kernel, cmap='gray')
 plt.show()
 
