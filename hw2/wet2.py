@@ -148,8 +148,8 @@ cv2.imwrite('l_im_sinc.png', l_im_sinc)
 cv2.imwrite('h_im_sinc.png', h_im_sinc)
 
 
-kernel = estimate_kernel(l_im_gaussian, num_large_patches=1000, num_small_patches=1000, num_iterations=5,
-                         reg_weight=0, weights_sigma=1, large_patch_size=16, show_plots=True)
+kernel = estimate_kernel(l_im_gaussian, num_large_patches=300, num_small_patches=300, num_iterations=5,
+                         reg_weight=1, weights_sigma=1, large_patch_size=16, k_neighbors=5, show_plots=True)
 plt.imshow(kernel, cmap='gray')
 plt.show()
 
