@@ -1,128 +1,172 @@
 import cv2
 import scipy.signal
+import sklearn
 from matplotlib import pyplot as plt
 import numpy as np
-from scipy import fftpack
-
+from scipy import fftpack, signal
+from scipy.linalg import circulant
 from wet2_utils import *
 from conv_as_matrix import *
+import sklearn.neighbors
 
 # --- parameters
-LOW_RES_RATIO = 4
-HIGH_RES_RATIO = 2
+LOW_RES_RATIO = 3
+HIGH_RES_RATIO = 1
 ALPHA = LOW_RES_RATIO // HIGH_RES_RATIO
 
-KERNEL_SIZE = 7
+KERNEL_SIZE = 12
 GAUSSIAN_STD = 1
 SINC_SCALE = 3
-# ---
 
 
-def create_patches(img, num_patches=50, patch_size=9):
+#  Weiner filter
+def reconstract_image(img, psf, epsilon=0.1):
+    # Normalize the psf
+    if np.sum(psf):
+        psf /= np.sum(psf)
+
+    F_img = fftpack.fft2(img)
+    F_psf = fftpack.fft2(psf, shape=img.shape)
+    F_psf = np.conj(F_psf) / (np.abs(F_psf) ** 2 + epsilon)
+    deblur_img = F_img * F_psf
+    deblur_img = np.abs(fftpack.ifft2(deblur_img))
+    return deblur_img
+
+
+def create_patches(img, patch_size=15, step_size=1):
     patches = []
-    for _ in range(num_patches):
-        x = np.random.randint(0, img.shape[0] - patch_size)
-        y = np.random.randint(0, img.shape[1] - patch_size)
-        patch = img[x:x + patch_size, y:y + patch_size]
-        patches.append(patch)
+    for i in range(0, int(img.shape[0] - patch_size), step_size):
+        for j in range(0, int(img.shape[1] - patch_size), step_size):
+            patch = img[i:i + patch_size, j:j + patch_size]
+            patches.append(patch)
     return patches
 
 
-def regularization_term(kernel):
-    # k_pad_x = np.pad(kernel, [[0, 0], [0, 1]])
-    # k_x = k_pad_x[:, 1:] - k_pad_x[:, :-1]
-    #
-    # k_pad_y = np.pad(kernel, [[0, 1], [0, 0]])
-    # k_y = k_pad_y[1:, :] - k_pad_y[:-1, :]
-    #
-    # k_derivatives = np.sqrt(k_x ** 2 + k_y ** 2)
-    # k_derivatives = k_derivatives / np.sum(k_derivatives)
-    k_laplacian = cv2.Laplacian(kernel, cv2.CV_64F)
-    k_derivatives = k_laplacian.reshape((-1, 1))
-    return k_derivatives @ k_derivatives.T
+def regularization_term(kernel_size):
+    a = -1
+    b = 4
+
+    laplacian_matrix = np.zeros((kernel_size ** 2, kernel_size ** 2))
+
+    diag_mat_1 = np.zeros((kernel_size, kernel_size))
+    for i in range(kernel_size):
+        for j in range(kernel_size):
+            if i == j:
+                diag_mat_1[i, j] = b
+            if abs(i - j) == 1:
+                diag_mat_1[i, j] = a
+
+    diag_mat_2 = np.zeros((kernel_size, kernel_size))
+    for i in range(kernel_size):
+        diag_mat_2[i, i] = a
+
+    start_index = 0
+    end_index = kernel_size
+
+    for i in range(kernel_size):
+        laplacian_matrix[start_index:end_index, start_index:end_index] = diag_mat_1
+        start_index += kernel_size
+        end_index += kernel_size
+
+    start_index_x = 0
+    end_index_x = kernel_size
+    start_index_y = kernel_size
+    end_index_y = 2 * kernel_size
+
+    for i in range(kernel_size - 1):
+        laplacian_matrix[start_index_x:end_index_x, start_index_y:end_index_y] = diag_mat_2
+        laplacian_matrix[start_index_y:end_index_y, start_index_x:end_index_x] = diag_mat_2
+
+        start_index_x += kernel_size
+        end_index_x += kernel_size
+        start_index_y += kernel_size
+        end_index_y += kernel_size
+
+    return laplacian_matrix @ laplacian_matrix.T
 
 
-def estimate_kernel(img, num_large_patches=100, num_small_patches=100, large_patch_size=16,
-                    num_iterations=50, kernel_size=KERNEL_SIZE, reg_weight=1, weights_sigma=10,
-                    k_neighbors=10, show_plots=False):
+def estimate_kernel(img, large_patch_size=15, num_iterations=5, kernel_size=KERNEL_SIZE, weights_sigma=0.06,
+                    k_neighbors=5, show_plots=False):
 
-    large_patches = create_patches(img, num_large_patches, large_patch_size)
-    small_patches = create_patches(img, num_small_patches, large_patch_size // ALPHA)
+    small_patch_size = large_patch_size // ALPHA
+    large_patches = create_patches(img, large_patch_size, ALPHA)
+    small_patches = create_patches(img, small_patch_size, 1)
 
     R_j_list = []
     for patch in large_patches:
         R_j = get_downsample_convolution_matrix(patch, ALPHA, kernel_size)
         R_j_list.append(R_j)  # save them for later (last step)
 
+    q_vec = []
+    for patch in small_patches:
+        q_i = patch.reshape(patch.size)
+        q_vec.append(q_i)
+    q_vec = np.array(q_vec)
+
     # plot some patches:
-    plot_sample_pathces(large_patches[:9])
+    if show_plots:
+        plot_sample_pathces(large_patches[:9])
 
     # initialize delta kernel:
-    kernel = np.zeros((kernel_size, kernel_size))
-    kernel[kernel_size // 2, kernel_size // 2] = 1
+    kernel = fftpack.fftshift(scipy.signal.unit_impulse((kernel_size, kernel_size)))
+    kernel = kernel.reshape(kernel.size)
+    kernel_reshaped = kernel.reshape((kernel_size, kernel_size))
+    reg_term = regularization_term(kernel_size)
 
-    for _ in range(num_iterations):
-        if show_plots:
-            plt.imshow(kernel, cmap='gray')
-            plt.show()
-        down_sampled_large_patches = [] # r_j^alpha in the paper
+    for i in range(num_iterations):
+        print("iteration: ", i+1)
+        down_sampled_large_patches = []  # r_j^alpha in the paper
         for j, patch in enumerate(large_patches):
             R_j = R_j_list[j]
-            stacked_kernel = np.reshape(kernel, (-1, 1))
-            down_sampled_large_patches.append(np.squeeze(R_j @ stacked_kernel))
-        # down_sampled_large_patches = np.array(down_sampled_large_patches)
+            down_sampled_large_patches.append(R_j @ kernel)
+        down_sampled_large_patches = np.array(down_sampled_large_patches)
 
         # plot downsampled large patches:
         if show_plots:
             _down_sampled = []
             for i in range(len(down_sampled_large_patches)):
-                p = down_sampled_large_patches[i].reshape((large_patch_size // ALPHA, large_patch_size // ALPHA))
-                # p = np.roll(p, 1, axis=0)
-                # p = np.roll(p, 1, axis=1)
-                # down_sampled_large_patches[i] = p.reshape(-1)
+                p = down_sampled_large_patches[i].reshape((small_patch_size, small_patch_size))
                 _down_sampled.append(p)
             plot_sample_pathces(_down_sampled[:9])
-        down_sampled_large_patches = np.array(down_sampled_large_patches)
 
-        W = []
-        for qi in small_patches: # calculate each row in w_ij
-            qi = qi.reshape((1, -1))
-            w_i = qi - down_sampled_large_patches  # for each j, using broadcasting
-            w_i = np.linalg.norm(w_i, axis=1, ord=1)
-            w_i = np.exp(-0.5 * w_i/(weights_sigma**2))
-            # take only k_neighbors closest neighbors and normalize:
-            w_i = w_i * (w_i >= np.sort(w_i)[[-k_neighbors]]).astype(int)
-            w_i = w_i / np.sum(w_i)
-            W.append(w_i)
-        W = np.array(W)
-        # W /= np.sum(W, axis=1)[:, np.newaxis]
+        tree = sklearn.neighbors.BallTree(down_sampled_large_patches, leaf_size=2)
+        W = np.zeros((len(q_vec), len(down_sampled_large_patches)))
+        for i, q_i in enumerate(q_vec):
+            expand_q_i = np.expand_dims(q_i, 0)
+            _, indices = tree.query(expand_q_i, k=k_neighbors)
+            for j in indices:
+                W[i, j] = np.exp(-0.5 * (np.linalg.norm(q_i - down_sampled_large_patches[j]) ** 2) /
+                                     (weights_sigma ** 2))
+
+        W_sum = np.sum(W, axis=1)
+
+        for row in range(W.shape[0]):
+            row_sum = W_sum[row]
+            if row_sum:
+                W[row] = W[row] / row_sum  ## normalize each column
 
         # calculate new kernel k = A^-1 @ b:
-        A = np.zeros((kernel_size**2, kernel_size**2))
-        b = np.zeros((kernel_size**2, 1))
+        A = np.zeros((kernel_size ** 2, kernel_size ** 2))
+        b = np.zeros_like(kernel)
 
-        # for j in range(num_large_patches):
-        #     R_j = R_j_list[j]
-        #     A += R_j.T @ R_j * np.sum(W[:, j])
-        #     for i in range(num_small_patches):
-        #         qi = small_patches[i]
-        #         qi = qi.reshape((-1, 1))
-        #         b += W[i, j] * R_j.T @ qi
+        for i in range(W.shape[0]):
+            for j in range(W.shape[1]):
+                if not W[i, j]:
+                    continue
+                A += W[i, j] * R_j_list[j].T @ R_j_list[j] + reg_term
+                b += W[i, j] * R_j_list[j].T @ q_vec[i]
 
-        for i in range(num_small_patches):
-            for j in range(num_large_patches):
-                A += W[i, j] * R_j_list[j].T @ R_j_list[j]
-                b += W[i, j] * R_j_list[j].T @ small_patches[i].reshape((-1, 1))
+        A = A / (weights_sigma ** 2)
+        epsilon = 1e-12
+        epsilon_mat = np.eye(kernel.shape[0]) * epsilon
+        kernel = np.linalg.inv(A + epsilon_mat) @ b
+        kernel_reshaped = kernel.reshape((kernel_size, kernel_size))
 
-        A = A / weights_sigma**2
-        # add regularization C^T @ C
-        A += reg_weight * regularization_term(kernel)
+        if show_plots:
+            plt.imshow(kernel_reshaped)
+            plt.show()
 
-        kernel = np.linalg.inv(A) @ b
-        kernel = kernel.reshape((kernel_size, kernel_size))
-        kernel = kernel/np.sum(kernel)
-
-    return kernel
+    return kernel_reshaped
 
 
 def psnr(im1, im2):
@@ -131,43 +175,49 @@ def psnr(im1, im2):
     return 20 * np.log10(PIXEL_MAX) - 10 * np.log10(mse)
 
 
-continuous_image = cv2.imread('DIPSourceHW2.png', cv2.IMREAD_GRAYSCALE) / 255
-continuous_image = continuous_image[:-3, :-3]
+def get_images(path, scale_factor=1):
 
-gaussian_kernel = get_gaussian_kernel(KERNEL_SIZE, std=GAUSSIAN_STD)
-l_im_gaussian = down_sample(continuous_image, gaussian_kernel, LOW_RES_RATIO)
-h_im_gaussian = down_sample(continuous_image, gaussian_kernel, HIGH_RES_RATIO)
-cv2.imwrite('l_im_gaussian.png', l_im_gaussian)
-cv2.imwrite('h_im_gaussian.png', h_im_gaussian)
+    continuous_image = cv2.imread('DIPSourceHW2.png', cv2.IMREAD_GRAYSCALE) / scale_factor
+    continuous_image = continuous_image[:-3, :-3]
+
+    gaussian_kernel = get_gaussian_kernel(KERNEL_SIZE, std=GAUSSIAN_STD)
+    l_im_gaussian = down_sample(continuous_image, gaussian_kernel, LOW_RES_RATIO)
+    h_im_gaussian = down_sample(continuous_image, gaussian_kernel, HIGH_RES_RATIO)
+
+    sinc_kernel = get_sinc_kernel(KERNEL_SIZE, scale=SINC_SCALE)
+    l_im_sinc = down_sample(continuous_image, sinc_kernel, LOW_RES_RATIO)
+    h_im_sinc = down_sample(continuous_image, sinc_kernel, HIGH_RES_RATIO)
+
+    return l_im_gaussian, h_im_gaussian, l_im_sinc, h_im_sinc
 
 
-sinc_kernel = sinc_kernel(KERNEL_SIZE, scale=SINC_SCALE)
-l_im_sinc = down_sample(continuous_image, sinc_kernel, LOW_RES_RATIO)
-h_im_sinc = down_sample(continuous_image, sinc_kernel, HIGH_RES_RATIO)
-cv2.imwrite('l_im_sinc.png', l_im_sinc)
-cv2.imwrite('h_im_sinc.png', h_im_sinc)
+def main():
+    l_im_gaussian, h_im_gaussian, l_im_sinc, h_im_sinc = get_images('DIPSourceHW2.png', scale_factor=1)
+    cv2.imwrite('l_im_gaussian.png', l_im_gaussian)
+    cv2.imwrite('h_im_gaussian.png', h_im_gaussian)
+    cv2.imwrite('l_im_sinc.png', l_im_sinc)
+    cv2.imwrite('h_im_sinc.png', h_im_sinc)
+
+    # to get the kernel we need to normalize the original image:
+    l_im_gaussian, h_im_gaussian, l_im_sinc, h_im_sinc = get_images('DIPSourceHW2.png', scale_factor=255)
+
+    best_gaussian_kernel = estimate_kernel(l_im_gaussian, num_iterations=5, weights_sigma=0.1, large_patch_size=15,
+                                      k_neighbors=5, show_plots=False)
+    l_im_gaussian_recon = reconstract_image(h_im_gaussian, best_gaussian_kernel)
+    recon_gaussian_psnr = psnr(l_im_gaussian_recon, h_im_gaussian)
+    print("PSNR Gaussian Reconstraction:", recon_gaussian_psnr)
+
+    best_sinc_kernel = estimate_kernel(l_im_sinc, num_iterations=5, weights_sigma=0.1, large_patch_size=15,
+                                  k_neighbors=5, show_plots=False)
+    l_im_sinc_recon = reconstract_image(h_im_sinc, best_sinc_kernel)
+    recon_sinc_psnr = psnr(l_im_sinc_recon, h_im_sinc)
+    print("PSNR Sinc Reconstraction:", recon_sinc_psnr)
+
+    plt.imsave(f'l_im_gaussian_recon_psnr_{recon_gaussian_psnr}.png', l_im_gaussian_recon, cmap='gray')
+    plt.show()
+    plt.imsave(f'l_im_sinc_recon_recon_psnr_{recon_sinc_psnr}.png', l_im_sinc_recon, cmap='gray')
+    plt.show()
 
 
-kernel = estimate_kernel(l_im_gaussian, num_large_patches=300, num_small_patches=300, num_iterations=5,
-                         reg_weight=1, weights_sigma=1, large_patch_size=16, k_neighbors=5, show_plots=True)
-plt.imshow(kernel, cmap='gray')
-plt.show()
-
-kernel_F = fftpack.fftshift(fftpack.fft2(kernel))
-deblur_kernel_F = kernel_F ** (-1)
-deblur_kernel = np.abs(fftpack.ifft2(fftpack.ifftshift(deblur_kernel_F)))
-plt.imshow(deblur_kernel, cmap='gray')
-plt.show()
-
-l_im_gaussian_recon = cv2.resize(l_im_gaussian, (l_im_gaussian.shape[1]*2, l_im_gaussian.shape[0]*2))
-
-l_im_gaussian_recon = scipy.signal.convolve2d(l_im_gaussian_recon, deblur_kernel, mode='same', boundary='wrap')
-
-plt.imshow(h_im_gaussian, cmap='gray')
-plt.show()
-plt.imshow(l_im_gaussian, cmap='gray')
-plt.show()
-plt.imshow(l_im_gaussian_recon, cmap='gray')
-plt.show()
-
-print("psnr:", psnr(l_im_gaussian_recon, h_im_gaussian))
+if __name__ == '__main__':
+    main()

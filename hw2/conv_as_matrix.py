@@ -70,25 +70,25 @@ def get_downsample_convolution_matrix(im, ratio, k_size):
     return downsample_matrix @ conv_mat
 
 
-im = np.array([[1, 2, 3, 11],
-               [4, 5, 6, 12],
-               [7, 8, 9, 13],
-               [10, 14, 15, 16]])
-kernel = np.array([[2, 4, 6],
-                   [8, 10, 12],
-                   [14, 16, 18]])
+# im = np.array([[1, 2, 3, 11],
+#                [4, 5, 6, 12],
+#                [7, 8, 9, 13],
+#                [10, 14, 15, 16]])
+# kernel = np.array([[2, 4, 6],
+#                    [8, 10, 12],
+#                    [14, 16, 18]])
 
 
-print("result:")
-conv_mat = get_image_convolution_matrix(im, kernel.shape[0])
-downsample_mat = get_downsample_matrix(im.shape[0], 2)
-
-Rj = downsample_mat @ conv_mat
-
-
-print((conv_mat @ kernel.reshape(-1, 1)).reshape(im.shape[0], im.shape[0]))
-
-# kernel = np.flipud(kernel)
-# kernel = np.fliplr(kernel)
-print("res scipy: ")
-print(scipy.signal.convolve2d(im, kernel, mode='same'))
+# print("result:")
+# conv_mat = get_image_convolution_matrix(im, kernel.shape[0])
+# downsample_mat = get_downsample_matrix(im.shape[0], 2)
+#
+# Rj = downsample_mat @ conv_mat
+#
+#
+# print((conv_mat @ kernel.reshape(-1, 1)).reshape(im.shape[0], im.shape[0]))
+#
+# # kernel = np.flipud(kernel)
+# # kernel = np.fliplr(kernel)
+# print("res scipy: ")
+# print(scipy.signal.convolve2d(im, kernel, mode='same'))

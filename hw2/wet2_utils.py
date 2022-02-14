@@ -12,7 +12,7 @@ def get_gaussian_kernel(size, std=1):
     return kernel / kernel.sum()
 
 
-def sinc_kernel(size, scale=1):
+def get_sinc_kernel(size, scale=1):
     edge = size // 2
     ax = np.linspace(-edge, edge, num=size)
     kernel = np.outer(ax, ax)
