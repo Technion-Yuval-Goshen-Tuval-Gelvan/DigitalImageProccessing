@@ -14,7 +14,7 @@ LOW_RES_RATIO = 3
 HIGH_RES_RATIO = 1
 ALPHA = LOW_RES_RATIO // HIGH_RES_RATIO
 
-KERNEL_SIZE = 12
+KERNEL_SIZE = 15
 GAUSSIAN_STD = 1
 SINC_SCALE = 3
 
@@ -85,8 +85,8 @@ def regularization_term(kernel_size):
     return laplacian_matrix @ laplacian_matrix.T
 
 
-def estimate_kernel(img, large_patch_size=15, num_iterations=5, kernel_size=KERNEL_SIZE, weights_sigma=0.06,
-                    k_neighbors=5, show_plots=False):
+def estimate_kernel(img, large_patch_size=15, num_iterations=5, kernel_size=KERNEL_SIZE, weights_sigma=0.1,
+                    k_neighbors=5, reg_weight=0.5, show_plots=False):
 
     small_patch_size = large_patch_size // ALPHA
     large_patches = create_patches(img, large_patch_size, ALPHA)
@@ -113,8 +113,8 @@ def estimate_kernel(img, large_patch_size=15, num_iterations=5, kernel_size=KERN
     kernel_reshaped = kernel.reshape((kernel_size, kernel_size))
     reg_term = regularization_term(kernel_size)
 
-    for i in range(num_iterations):
-        print("iteration: ", i+1)
+    for iter in range(num_iterations):
+        print("iteration: ", iter+1)
         down_sampled_large_patches = []  # r_j^alpha in the paper
         for j, patch in enumerate(large_patches):
             R_j = R_j_list[j]
@@ -153,7 +153,7 @@ def estimate_kernel(img, large_patch_size=15, num_iterations=5, kernel_size=KERN
             for j in range(W.shape[1]):
                 if not W[i, j]:
                     continue
-                A += W[i, j] * R_j_list[j].T @ R_j_list[j] + reg_term
+                A += W[i, j] * R_j_list[j].T @ R_j_list[j] + reg_term * reg_weight
                 b += W[i, j] * R_j_list[j].T @ q_vec[i]
 
         A = A / (weights_sigma ** 2)
@@ -163,6 +163,7 @@ def estimate_kernel(img, large_patch_size=15, num_iterations=5, kernel_size=KERN
         kernel_reshaped = kernel.reshape((kernel_size, kernel_size))
 
         if show_plots:
+            plt.title(f"iteration: {iter+1}")
             plt.imshow(kernel_reshaped)
             plt.show()
 
@@ -178,8 +179,11 @@ def psnr(im1, im2):
 def get_images(path, scale_factor=1):
 
     continuous_image = cv2.imread('DIPSourceHW2.png', cv2.IMREAD_GRAYSCALE) / scale_factor
-    continuous_image = continuous_image[:-3, :-3]
+    shape_0_res = continuous_image.shape[0] % ALPHA
+    shape_1_res = continuous_image.shape[1] % ALPHA
+    continuous_image = continuous_image[:-shape_0_res, :-shape_1_res]
 
+    #true kernel:
     gaussian_kernel = get_gaussian_kernel(KERNEL_SIZE, std=GAUSSIAN_STD)
     l_im_gaussian = down_sample(continuous_image, gaussian_kernel, LOW_RES_RATIO)
     h_im_gaussian = down_sample(continuous_image, gaussian_kernel, HIGH_RES_RATIO)
@@ -200,22 +204,43 @@ def main():
 
     # to get the kernel we need to normalize the original image:
     l_im_gaussian, h_im_gaussian, l_im_sinc, h_im_sinc = get_images('DIPSourceHW2.png', scale_factor=255)
+    l_im_gaussian_upsample = cv2.resize(l_im_gaussian, (int(l_im_gaussian.shape[1] * ALPHA), int(l_im_gaussian.shape[0] * ALPHA)))
+    assert(l_im_gaussian_upsample.shape == h_im_gaussian.shape)
 
-    best_gaussian_kernel = estimate_kernel(l_im_gaussian, num_iterations=5, weights_sigma=0.1, large_patch_size=15,
+    l_im_sinc_upsample = cv2.resize(l_im_sinc, (int(l_im_sinc.shape[1] * ALPHA), int(l_im_sinc.shape[0] * ALPHA)))
+    assert (l_im_sinc_upsample.shape == h_im_sinc.shape)
+
+    # estimated reconstructions:
+    estimated_gaussian_kernel = estimate_kernel(l_im_gaussian, num_iterations=5, weights_sigma=0.1, large_patch_size=15,
                                       k_neighbors=5, show_plots=False)
-    l_im_gaussian_recon = reconstract_image(h_im_gaussian, best_gaussian_kernel)
-    recon_gaussian_psnr = psnr(l_im_gaussian_recon, h_im_gaussian)
-    print("PSNR Gaussian Reconstraction:", recon_gaussian_psnr)
+    l_im_estimated_gaussian_recon = reconstract_image(l_im_gaussian_upsample, estimated_gaussian_kernel)
+    recon_estimated_gaussian_psnr = psnr(l_im_estimated_gaussian_recon, h_im_gaussian)
+    print("PSNR Estimated Kernel Gaussian Reconstraction:", recon_estimated_gaussian_psnr)
 
-    best_sinc_kernel = estimate_kernel(l_im_sinc, num_iterations=5, weights_sigma=0.1, large_patch_size=15,
+    estimated_sinc_kernel = estimate_kernel(l_im_sinc, num_iterations=5, weights_sigma=0.1, large_patch_size=15,
                                   k_neighbors=5, show_plots=False)
-    l_im_sinc_recon = reconstract_image(h_im_sinc, best_sinc_kernel)
-    recon_sinc_psnr = psnr(l_im_sinc_recon, h_im_sinc)
-    print("PSNR Sinc Reconstraction:", recon_sinc_psnr)
+    l_im_estimated_sinc_recon = reconstract_image(l_im_sinc_upsample, estimated_sinc_kernel)
+    recon_estimated_sinc_psnr = psnr(l_im_estimated_sinc_recon, h_im_sinc)
+    print("PSNR Estimated Kernel Sinc Reconstraction:", recon_estimated_sinc_psnr)
 
-    plt.imsave(f'l_im_gaussian_recon_psnr_{recon_gaussian_psnr}.png', l_im_gaussian_recon, cmap='gray')
+    plt.imsave(f'l_im_estimated_gaussian_recon_psnr_{recon_estimated_gaussian_psnr}.png', l_im_estimated_gaussian_recon, cmap='gray')
     plt.show()
-    plt.imsave(f'l_im_sinc_recon_recon_psnr_{recon_sinc_psnr}.png', l_im_sinc_recon, cmap='gray')
+    plt.imsave(f'l_im_estimated_sinc_recon_psnr_{recon_estimated_sinc_psnr}.png', l_im_estimated_sinc_recon, cmap='gray')
+    plt.show()
+
+    # wrong reconstractions:
+    l_im_wrong_gaussian_recon = reconstract_image(l_im_gaussian_upsample, estimated_sinc_kernel)
+    recon_wrong_gaussian_psnr = psnr(l_im_wrong_gaussian_recon, h_im_gaussian)
+    print("PSNR Wrong Kernel Gaussian Reconstraction:", recon_wrong_gaussian_psnr)
+
+
+    l_im_wrong_sinc_recon = reconstract_image(l_im_sinc_upsample, estimated_gaussian_kernel)
+    recon_wrong_sinc_psnr = psnr(l_im_wrong_sinc_recon, h_im_sinc)
+    print("PSNR Wrong Kernel Sinc Reconstraction:", recon_wrong_sinc_psnr)
+
+    plt.imsave(f'l_im_wrong_gaussian_recon_psnr_{recon_wrong_gaussian_psnr}.png', l_im_wrong_gaussian_recon, cmap='gray')
+    plt.show()
+    plt.imsave(f'l_im_wrong_sinc_recon_psnr_{recon_wrong_sinc_psnr}.png', l_im_wrong_sinc_recon, cmap='gray')
     plt.show()
 
 

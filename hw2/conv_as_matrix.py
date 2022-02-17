@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.linalg import toeplitz
+from scipy.linalg import toeplitz, circulant
 import scipy.signal
 
 
@@ -62,33 +62,13 @@ def get_downsample_matrix(im_size, ratio):
 
 def get_downsample_convolution_matrix(im, ratio, k_size):
     """
-    creates matrix that when multiplied by a stacked kernel acts as convolution + downsample operator:
-    downsample(im*kernal) = this_mat @ reshape(flip(kernel), (-1, 1))
+    creates matrix that when multiplied by a stacked kernel acts as convolution + downsample operator
     """
-    conv_mat = get_image_convolution_matrix(im, k_size)
-    downsample_matrix = get_downsample_matrix(im.shape[0], ratio)
-    return downsample_matrix @ conv_mat
+    conv_mat = im.reshape(im.size)
+    conv_circulant = create_circulant_matrix(conv_mat, im.size, im.size)
 
+    # optional: not take in count the edges
+    conv_toplitz = get_image_convolution_matrix(im, k_size)
 
-# im = np.array([[1, 2, 3, 11],
-#                [4, 5, 6, 12],
-#                [7, 8, 9, 13],
-#                [10, 14, 15, 16]])
-# kernel = np.array([[2, 4, 6],
-#                    [8, 10, 12],
-#                    [14, 16, 18]])
-
-
-# print("result:")
-# conv_mat = get_image_convolution_matrix(im, kernel.shape[0])
-# downsample_mat = get_downsample_matrix(im.shape[0], 2)
-#
-# Rj = downsample_mat @ conv_mat
-#
-#
-# print((conv_mat @ kernel.reshape(-1, 1)).reshape(im.shape[0], im.shape[0]))
-#
-# # kernel = np.flipud(kernel)
-# # kernel = np.fliplr(kernel)
-# print("res scipy: ")
-# print(scipy.signal.convolve2d(im, kernel, mode='same'))
+    downsampled_matrix = get_downsample_matrix(im.shape[0], ratio)
+    return downsampled_matrix @ conv_circulant
