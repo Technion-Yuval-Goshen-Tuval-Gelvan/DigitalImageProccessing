@@ -51,3 +51,10 @@ def plot_sample_pathces(patch_list):
     plt.show()
 
 
+def create_patches(img, patch_size=15, step_size=1):
+    patches = []
+    for i in range(0, int(img.shape[0] - patch_size), step_size):
+        for j in range(0, int(img.shape[1] - patch_size), step_size):
+            patch = img[i:i + patch_size, j:j + patch_size]
+            patches.append(patch)
+    return patches

@@ -1,10 +1,8 @@
-import cv2
 import scipy.signal
 import sklearn
 from matplotlib import pyplot as plt
 import numpy as np
 from scipy import fftpack, signal
-from scipy.linalg import circulant
 from wet2_utils import *
 from conv_as_matrix import *
 import sklearn.neighbors
@@ -31,15 +29,6 @@ def reconstract_image(img, psf, epsilon=0.1):
     deblur_img = F_img * F_psf
     deblur_img = np.abs(fftpack.ifft2(deblur_img))
     return deblur_img
-
-
-def create_patches(img, patch_size=15, step_size=1):
-    patches = []
-    for i in range(0, int(img.shape[0] - patch_size), step_size):
-        for j in range(0, int(img.shape[1] - patch_size), step_size):
-            patch = img[i:i + patch_size, j:j + patch_size]
-            patches.append(patch)
-    return patches
 
 
 def regularization_term(kernel_size):
@@ -177,7 +166,6 @@ def psnr(im1, im2):
 
 
 def get_images(path, scale_factor=1):
-
     continuous_image = cv2.imread('DIPSourceHW2.png', cv2.IMREAD_GRAYSCALE) / scale_factor
     shape_0_res = continuous_image.shape[0] % ALPHA
     shape_1_res = continuous_image.shape[1] % ALPHA
